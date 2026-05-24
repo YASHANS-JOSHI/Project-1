@@ -231,7 +231,8 @@ def _ai_package(
     *,
     student_friendly: bool = True,
 ) -> UnitContentPackage:
-    content_slides = max(3, min(15, metrics.target_slides - 6))
+    # Smaller requests help Groq free-tier rate limits (12k TPM)
+    content_slides = max(3, min(8, metrics.target_slides - 6))
     system = STUDENT_SYSTEM if student_friendly else ACADEMIC_SYSTEM
     user = _build_ai_prompt(subject, unit, metrics, content_slides, student_friendly)
 

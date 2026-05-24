@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import re
+import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
@@ -56,7 +57,10 @@ def export_subject(
     safe = re.sub(r"[^\w\-]+", "_", subject.name)[:50].strip("_")
     result = SubjectExportResult(subject=subject, output_dir=output_dir)
 
-    for unit in units:
+    for idx, unit in enumerate(units):
+        if use_ai and idx > 0:
+            # Groq free tier ~12k TPM — pause between units to avoid 429
+            time.sleep(12)
         pack = generate_unit_content(
             subject,
             unit,
