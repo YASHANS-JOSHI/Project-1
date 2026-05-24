@@ -1,0 +1,26 @@
+# Secrets — never commit API keys
+.env
+.env.local
+
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+.env/
+
+# Generated outputs
+output/
+
+# OS / editor
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+*.swp
+
+# Temp extracts
+_docx_extract.txt
+_pdf_extract.txt
+_pptx_extract.txt
