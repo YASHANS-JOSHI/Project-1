@@ -21,9 +21,12 @@ import streamlit as st
 # Streamlit Cloud: load API keys from Secrets (see .streamlit/secrets.toml.example)
 try:
     if hasattr(st, "secrets"):
+        from ugc_core.ai_client import normalize_api_key
+
         for key in ("GROQ_API_KEY", "GROQ_MODEL", "AI_PROVIDER", "OPENAI_API_KEY", "OPENAI_MODEL"):
             if key in st.secrets:
-                os.environ[key] = str(st.secrets[key])
+                val = str(st.secrets[key])
+                os.environ[key] = normalize_api_key(val) if "KEY" in key else val.strip()
 except Exception:
     pass
 
@@ -94,11 +97,26 @@ def _sidebar_settings() -> dict:
             help="Groq has a free tier and works well for drafts.",
         )
         if provider == "groq":
-            api_key = st.text_input("GROQ_API_KEY", type="password", value=os.environ.get("GROQ_API_KEY", ""))
-            model = st.text_input("Model", value=os.environ.get("GROQ_MODEL", "llama-3.3-70b-versatile"))
+            from ugc_core.ai_client import normalize_api_key, validate_groq_key
+
+            api_key = st.text_input(
+                "GROQ_API_KEY",
+                type="password",
+                value=os.environ.get("GROQ_API_KEY", ""),
+                help="Starts with gsk_ — from https://console.groq.com/keys",
+            )
+            model = st.text_input(
+                "Model",
+                value=os.environ.get("GROQ_MODEL", "llama-3.1-8b-instant"),
+                help="Free tier: llama-3.1-8b-instant (recommended). 70b hits rate limits faster.",
+            )
             if api_key:
+                api_key = normalize_api_key(api_key)
                 os.environ["GROQ_API_KEY"] = api_key
                 os.environ["AI_PROVIDER"] = "groq"
+            err = validate_groq_key(api_key or os.environ.get("GROQ_API_KEY", ""))
+            if err:
+                st.warning(err)
             if model:
                 os.environ["GROQ_MODEL"] = model
         else:
@@ -138,12 +156,11 @@ def _mime_for(path: Path) -> str:
     return "application/octet-stream"
 
 
-def _offer_downloads(result, out_dir: Path) -> None:
+def _offer_downloads(result, out_dir: Path, *, widget_key_prefix: str = "export") -> None:
     """Let users download files (required on Streamlit Cloud — server paths are not on your PC)."""
     st.subheader("Download generated files")
     st.info(
-        "Paths like `/mount/src/project-1/output/...` are **on Streamlit's server**, not your computer. "
-        "Use the buttons below to save files to your PC, then open with PowerPoint or Google Slides."
+        "Use the buttons below to save files to your PC, then open `.pptx` in PowerPoint or Google Slides."
     )
 
     zip_buf = io.BytesIO()
@@ -151,7 +168,7 @@ def _offer_downloads(result, out_dir: Path) -> None:
         for bundle in result.units:
             for path in (bundle.ppt, bundle.slm, bundle.transcript, bundle.storyboard):
                 if path and path.exists():
-                    zf.write(path, arcname=f"Unit_{bundle.unit.label}/{path.name}")
+                    zf.write(path, arcname=f"Unit_{bundle.unit.number}_{bundle.unit.label}/{path.name}")
     zip_buf.seek(0)
     safe_name = _slug(result.subject.name)
     st.download_button(
@@ -160,10 +177,12 @@ def _offer_downloads(result, out_dir: Path) -> None:
         file_name=f"{safe_name}_all_units.zip",
         mime="application/zip",
         type="primary",
+        key=f"{widget_key_prefix}-zip-all",
     )
 
-    for bundle in result.units:
-        with st.expander(f"Unit {bundle.unit.label}"):
+    btn_idx = 0
+    for u_idx, bundle in enumerate(result.units):
+        with st.expander(f"Unit {bundle.unit.label} (#{bundle.unit.number})"):
             for label, path in (
                 ("PowerPoint", bundle.ppt),
                 ("SLM (Word)", bundle.slm),
@@ -176,9 +195,10 @@ def _offer_downloads(result, out_dir: Path) -> None:
                         data=path.read_bytes(),
                         file_name=path.name,
                         mime=_mime_for(path),
-                        key=f"dl-{bundle.unit.label}-{path.name}",
+                        key=f"{widget_key_prefix}-dl-{u_idx}-{btn_idx}-{path.stem}",
                     )
-    st.caption(f"Server folder (for reference only): `{out_dir}`")
+                    btn_idx += 1
+    st.caption(f"Server folder (reference): `{out_dir}`")
 
 
 def _render_preview(subject, units, metrics) -> None:
@@ -203,6 +223,22 @@ def _run_generation(subject, settings: dict) -> None:
     if not tpl.exists():
         st.error(f"Template not found: {tpl}")
         return
+
+    if settings.get("use_ai") and settings.get("provider") == "groq":
+        from ugc_core.ai_client import normalize_api_key, validate_groq_key
+
+        key = normalize_api_key(settings.get("api_key") or os.environ.get("GROQ_API_KEY", ""))
+        err = validate_groq_key(key)
+        if err:
+            st.error(err)
+            st.markdown(
+                "**Streamlit Cloud:** App menu → **Settings** → **Secrets** and add:\n\n"
+                "```toml\nGROQ_API_KEY = \"gsk_your_real_key_here\"\n"
+                "GROQ_MODEL = \"llama-3.3-70b-versatile\"\nAI_PROVIDER = \"groq\"\n```\n\n"
+                "Then **Save** and **Reboot** the app. Do not use a placeholder key."
+            )
+            return
+
     out_dir = OUTPUT_ROOT / _slug(settings["program_name"]) / _slug(subject.name)
     mode = "AI" if settings["use_ai"] else "template"
     with st.spinner(f"Generating {subject.name} ({mode})…"):
@@ -223,16 +259,25 @@ def _run_generation(subject, settings: dict) -> None:
     files: list[str] = []
     for b in result.units:
         if b.pack.ai_error:
-            st.warning(f"Unit {b.unit.label}: AI unavailable — used template. ({b.pack.ai_error})")
+            msg = str(b.pack.ai_error)
+            if "429" in msg or "rate_limit" in msg.lower():
+                st.warning(
+                    f"Unit {b.unit.label}: Groq **rate limit** — used template. "
+                    "Wait 1 minute, use model `llama-3.1-8b-instant`, or generate **one unit at a time**."
+                )
+            else:
+                st.warning(f"Unit {b.unit.label}: AI unavailable — used template. ({msg})")
         elif settings["use_ai"]:
             st.caption(f"Unit {b.unit.label}: content via **{b.pack.generated_by}**")
         for p in (b.ppt, b.slm, b.transcript, b.storyboard):
             if p:
                 files.append(str(p))
     st.success(f"Generated {len(files)} file(s).")
-    _offer_downloads(result, out_dir)
+    prefix = f"dl-{_slug(subject.name)}"
     st.session_state["last_export"] = result
     st.session_state["last_out_dir"] = str(out_dir)
+    st.session_state["download_key_prefix"] = prefix
+    _offer_downloads(result, out_dir, widget_key_prefix=prefix)
 
 
 def tab_custom_subject(settings: dict) -> None:
