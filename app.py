@@ -6,18 +6,37 @@ from __future__ import annotations
 
 import os
 import re
+import sys
 import tempfile
 from pathlib import Path
 
+ROOT = Path(__file__).resolve().parent
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
+
 import streamlit as st
 
-from src.custom_syllabus import detect_credits, load_syllabus_file, subject_from_syllabus
-from src.pipeline import export_subject
-from src.syllabus_parser import load_subjects
-from src.unit_planner import plan_units
-from src.ugc_rules import compute_unit_metrics
+# Streamlit Cloud: load API keys from Secrets (see .streamlit/secrets.toml.example)
+try:
+    if hasattr(st, "secrets"):
+        for key in ("GROQ_API_KEY", "GROQ_MODEL", "AI_PROVIDER", "OPENAI_API_KEY", "OPENAI_MODEL"):
+            if key in st.secrets:
+                os.environ[key] = str(st.secrets[key])
+except Exception:
+    pass
 
-ROOT = Path(__file__).resolve().parent
+from ugc_core.custom_syllabus import detect_credits, load_syllabus_file, subject_from_syllabus
+from ugc_core.pipeline import export_subject
+from ugc_core.syllabus_parser import load_subjects
+from ugc_core.unit_planner import plan_units
+from ugc_core.ugc_rules import compute_unit_metrics
+
+if not (ROOT / "ugc_core" / "custom_syllabus.py").exists():
+    st.error(
+        "Missing `ugc_core/` package on the server. "
+        "Push the **full** GitHub repo (folder `ugc_core` with all `.py` files), not only `app.py`."
+    )
+    st.stop()
 DEFAULT_PDF = ROOT / "MBA-Online (1&2 sem) (2).pdf"
 DEFAULT_TEMPLATE = ROOT / "Sample PPT (1).pptx"
 OUTPUT_ROOT = ROOT / "output"
