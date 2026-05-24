@@ -5,11 +5,11 @@ from __future__ import annotations
 import argparse
 from pathlib import Path
 
-from src.custom_syllabus import load_syllabus_file, subject_from_syllabus
-from src.pipeline import export_subject
-from src.syllabus_parser import load_subjects
-from src.unit_planner import plan_units
-from src.ugc_rules import compute_unit_metrics
+from ugc_core.custom_syllabus import load_syllabus_file, subject_from_syllabus
+from ugc_core.pipeline import export_subject
+from ugc_core.syllabus_parser import load_subjects
+from ugc_core.unit_planner import plan_units
+from ugc_core.ugc_rules import compute_unit_metrics
 
 ROOT = Path(__file__).resolve().parent
 
