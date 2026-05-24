@@ -4,10 +4,12 @@ UGC Course Content Generator — enter subject + syllabus → generate slides & 
 
 from __future__ import annotations
 
+import io
 import os
 import re
 import sys
 import tempfile
+import zipfile
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parent
@@ -128,6 +130,57 @@ def _sidebar_settings() -> dict:
     }
 
 
+def _mime_for(path: Path) -> str:
+    if path.suffix.lower() == ".pptx":
+        return "application/vnd.openxmlformats-officedocument.presentationml.presentation"
+    if path.suffix.lower() == ".docx":
+        return "application/vnd.openxmlformats-officedocument.wordprocessingml.document"
+    return "application/octet-stream"
+
+
+def _offer_downloads(result, out_dir: Path) -> None:
+    """Let users download files (required on Streamlit Cloud — server paths are not on your PC)."""
+    st.subheader("Download generated files")
+    st.info(
+        "Paths like `/mount/src/project-1/output/...` are **on Streamlit's server**, not your computer. "
+        "Use the buttons below to save files to your PC, then open with PowerPoint or Google Slides."
+    )
+
+    zip_buf = io.BytesIO()
+    with zipfile.ZipFile(zip_buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for bundle in result.units:
+            for path in (bundle.ppt, bundle.slm, bundle.transcript, bundle.storyboard):
+                if path and path.exists():
+                    zf.write(path, arcname=f"Unit_{bundle.unit.label}/{path.name}")
+    zip_buf.seek(0)
+    safe_name = _slug(result.subject.name)
+    st.download_button(
+        "Download all units (ZIP)",
+        data=zip_buf.getvalue(),
+        file_name=f"{safe_name}_all_units.zip",
+        mime="application/zip",
+        type="primary",
+    )
+
+    for bundle in result.units:
+        with st.expander(f"Unit {bundle.unit.label}"):
+            for label, path in (
+                ("PowerPoint", bundle.ppt),
+                ("SLM (Word)", bundle.slm),
+                ("Transcript", bundle.transcript),
+                ("Storyboard", bundle.storyboard),
+            ):
+                if path and path.exists():
+                    st.download_button(
+                        f"Download {label}: {path.name}",
+                        data=path.read_bytes(),
+                        file_name=path.name,
+                        mime=_mime_for(path),
+                        key=f"dl-{bundle.unit.label}-{path.name}",
+                    )
+    st.caption(f"Server folder (for reference only): `{out_dir}`")
+
+
 def _render_preview(subject, units, metrics) -> None:
     c1, c2, c3, c4 = st.columns(4)
     c1.metric("Credits", subject.credits)
@@ -176,9 +229,10 @@ def _run_generation(subject, settings: dict) -> None:
         for p in (b.ppt, b.slm, b.transcript, b.storyboard):
             if p:
                 files.append(str(p))
-    st.success(f"Generated {len(files)} files in `{out_dir}`")
-    for f in files:
-        st.code(f)
+    st.success(f"Generated {len(files)} file(s).")
+    _offer_downloads(result, out_dir)
+    st.session_state["last_export"] = result
+    st.session_state["last_out_dir"] = str(out_dir)
 
 
 def tab_custom_subject(settings: dict) -> None:
