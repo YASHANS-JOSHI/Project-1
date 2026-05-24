@@ -201,10 +201,11 @@ def tab_custom_subject(settings: dict) -> None:
         uploaded = st.file_uploader("Or upload syllabus", type=["txt", "pdf", "docx"])
         credits_override = st.number_input(
             "Credits (optional override)",
-            min_value=1,
+            min_value=0,
             max_value=10,
             value=0,
-            help="0 = auto-detect from syllabus",
+            step=1,
+            help="Leave at 0 to auto-detect from syllabus (e.g. Credits: 4).",
         )
 
     if uploaded:
@@ -230,7 +231,7 @@ def tab_custom_subject(settings: dict) -> None:
             st.error("Enter subject name and syllabus text.")
             return
         try:
-            cr = int(credits_override) if credits_override else None
+            cr = int(credits_override) if credits_override > 0 else None
             subject = subject_from_syllabus(subject_name, combined_text, credits=cr)
             st.session_state["custom_subject"] = subject
         except Exception as e:
